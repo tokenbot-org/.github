@@ -1,0 +1,287 @@
+# Daily CI Health Check
+# Runs full CI suite and creates issues on consecutive failures
+# Schedule: 1:00 AM America/Los_Angeles (9:00 AM UTC)
+
+name: Daily CI Health Check
+
+on:
+  schedule:
+    - cron: '0 9 * * *'  # 1:00 AM PST (9:00 AM UTC)
+  workflow_dispatch:      # Manual testing
+
+permissions:
+  contents: read
+  issues: write
+  packages: read
+
+jobs:
+  health-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: develop
+
+      - name: Detect repo type
+        id: detect
+        run: |
+          if [ -f "package.json" ]; then
+            if grep -q '"pnpm"' package.json 2>/dev/null; then
+              echo "type=pnpm" >> $GITHUB_OUTPUT
+            else
+              echo "type=npm" >> $GITHUB_OUTPUT
+            fi
+          elif [ -f "pyproject.toml" ] || [ -f "setup.py" ]; then
+            echo "type=python" >> $GITHUB_OUTPUT
+          else
+            echo "type=static" >> $GITHUB_OUTPUT
+          fi
+
+      # Node.js setup (npm)
+      - name: Setup Node.js (npm)
+        if: steps.detect.outputs.type == 'npm'
+        uses: ./.github/actions/setup-node
+        continue-on-error: true
+
+      # Node.js setup (pnpm)
+      - name: Setup Node.js (pnpm)
+        if: steps.detect.outputs.type == 'pnpm'
+        uses: ./.github/actions/setup-node
+        continue-on-error: true
+
+      # Python setup
+      - name: Setup Python
+        if: steps.detect.outputs.type == 'python'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        if: steps.detect.outputs.type == 'python'
+        run: pip install -e ".[dev]"
+        continue-on-error: true
+
+      # Run CI steps
+      - name: Run lint
+        id: lint
+        if: steps.detect.outputs.type != 'static'
+        run: |
+          if [ "${{ steps.detect.outputs.type }}" == "pnpm" ]; then
+            pnpm run lint || exit 1
+          elif [ "${{ steps.detect.outputs.type }}" == "python" ]; then
+            ruff check src/ tests/ || exit 1
+          else
+            npm run lint || exit 1
+          fi
+        continue-on-error: true
+
+      - name: Run typecheck
+        id: typecheck
+        if: steps.detect.outputs.type == 'npm' || steps.detect.outputs.type == 'pnpm'
+        run: |
+          if [ "${{ steps.detect.outputs.type }}" == "pnpm" ]; then
+            pnpm run typecheck || exit 1
+          else
+            npx tsc --noEmit || exit 1
+          fi
+        continue-on-error: true
+
+      - name: Run tests
+        id: test
+        if: steps.detect.outputs.type != 'static'
+        run: |
+          if [ "${{ steps.detect.outputs.type }}" == "pnpm" ]; then
+            pnpm test || exit 1
+          elif [ "${{ steps.detect.outputs.type }}" == "python" ]; then
+            pytest -v || exit 1
+          else
+            npm test || exit 1
+          fi
+        continue-on-error: true
+
+      - name: Run build
+        id: build
+        if: steps.detect.outputs.type != 'static'
+        run: |
+          if [ "${{ steps.detect.outputs.type }}" == "pnpm" ]; then
+            pnpm run build || exit 1
+          elif [ "${{ steps.detect.outputs.type }}" == "python" ]; then
+            echo "Python build not required"
+          else
+            npm run build || exit 1
+          fi
+        continue-on-error: true
+
+      # HTML validation for static sites
+      - name: Validate HTML
+        id: validate
+        if: steps.detect.outputs.type == 'static'
+        run: |
+          echo "Installing html5validator..."
+          pip install html5validator
+          html5validator --root . --ignore-re '.git' '*.md' || exit 1
+        continue-on-error: true
+
+      # Check for failures and update state
+      - name: Check results
+        id: results
+        run: |
+          FAILED_STEPS=""
+          if [ "${{ steps.lint.outcome }}" == "failure" ]; then
+            FAILED_STEPS="$FAILED_STEPS lint"
+          fi
+          if [ "${{ steps.typecheck.outcome }}" == "failure" ]; then
+            FAILED_STEPS="$FAILED_STEPS typecheck"
+          fi
+          if [ "${{ steps.test.outcome }}" == "failure" ]; then
+            FAILED_STEPS="$FAILED_STEPS test"
+          fi
+          if [ "${{ steps.build.outcome }}" == "failure" ]; then
+            FAILED_STEPS="$FAILED_STEPS build"
+          fi
+          if [ "${{ steps.validate.outcome }}" == "failure" ]; then
+            FAILED_STEPS="$FAILED_STEPS validate"
+          fi
+
+          if [ -n "$FAILED_STEPS" ]; then
+            echo "has_failures=true" >> $GITHUB_OUTPUT
+            echo "failed_steps=$FAILED_STEPS" >> $GITHUB_OUTPUT
+          else
+            echo "has_failures=false" >> $GITHUB_OUTPUT
+          fi
+
+      # Track consecutive failures
+      - name: Update failure state
+        id: state
+        if: steps.results.outputs.has_failures == 'true'
+        run: |
+          # Check for existing failure state issue
+          EXISTING=$(gh issue list \
+            --repo ${{ github.repository }} \
+            --label "ci-health-state" \
+            --state open \
+            --json number \
+            --jq '.[0].number' || echo "")
+
+          if [ -z "$EXISTING" ]; then
+            # First failure - create state tracking issue
+            gh issue create \
+              --repo ${{ github.repository }} \
+              --title "[CI Health] Failure state tracking" \
+              --body "This issue tracks consecutive CI health check failures. It will be closed automatically when checks pass." \
+              --label "ci-health-state,automated" || echo "State issue creation failed"
+            echo "consecutive=1" >> $GITHUB_OUTPUT
+          else
+            # Increment failure count
+            COUNT=$(gh issue view $EXISTING --repo ${{ github.repository }} --json body --jq '.body' | grep -oP 'Count: \K\d+' || echo "1")
+            NEW_COUNT=$((COUNT + 1))
+            gh issue comment $EXISTING --repo ${{ github.repository }} --body "Failure count: $NEW_COUNT" || echo "Comment failed"
+            echo "consecutive=$NEW_COUNT" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # Clear state on success
+      - name: Clear failure state
+        if: steps.results.outputs.has_failures == 'false'
+        run: |
+          EXISTING=$(gh issue list \
+            --repo ${{ github.repository }} \
+            --label "ci-health-state" \
+            --state open \
+            --json number \
+            --jq '.[0].number' || echo "")
+
+          if [ -n "$EXISTING" ]; then
+            gh issue close $EXISTING \
+              --repo ${{ github.repository }} \
+              --comment "✅ CI health check passed - clearing failure state" || echo "Close failed"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # Create issue on 2+ consecutive failures
+      - name: Create failure issue
+        if: steps.results.outputs.has_failures == 'true' && steps.state.outputs.consecutive >= 2
+        run: |
+          FAILED="${{ steps.results.outputs.failed_steps }}"
+          PRIMARY=$(echo "$FAILED" | awk '{print $1}')
+
+          # Determine category label
+          case "$PRIMARY" in
+            lint) CATEGORY="lint-failure" ;;
+            typecheck) CATEGORY="typecheck-failure" ;;
+            test) CATEGORY="test-failure" ;;
+            build) CATEGORY="build-failure" ;;
+            validate) CATEGORY="validation-failure" ;;
+            *) CATEGORY="ci-failure" ;;
+          esac
+
+          # Check if similar issue already exists (avoid duplicates)
+          EXISTING=$(gh issue list \
+            --repo ${{ github.repository }} \
+            --label "$CATEGORY,automated" \
+            --state open \
+            --limit 1 \
+            --json number \
+            --jq '.[0].number' || echo "")
+
+          if [ -n "$EXISTING" ]; then
+            echo "Similar issue #$EXISTING already exists - adding comment"
+            gh issue comment $EXISTING \
+              --repo ${{ github.repository }} \
+              --body "🔄 Still failing after consecutive run. [View latest run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
+          else
+            echo "Creating new issue for $PRIMARY failure"
+            gh issue create \
+              --repo ${{ github.repository }} \
+              --title "🚨 CI Health Check Failed: $PRIMARY (consecutive failure #${{ steps.state.outputs.consecutive }})" \
+              --body "$(cat <<'EOF'
+## 🚨 Automated CI Failure Report
+
+**Workflow:** Daily CI Health Check  
+**Run:** [View run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})  
+**Branch:** develop  
+**Triggered:** ${{ github.event.schedule || 'manual' }} (1:00 AM PT / 9:00 AM UTC)  
+**Consecutive Failures:** ${{ steps.state.outputs.consecutive }}
+
+### Failure Details
+
+**Failed Steps:** $FAILED  
+**Primary Category:** $PRIMARY
+
+### Suggested Next Steps
+
+- [ ] Reproduce locally: \`git checkout develop && git pull\`
+- [ ] Run failed step(s) locally
+- [ ] Fix the issue
+- [ ] Run full local CI verification
+- [ ] Merge to develop locally
+- [ ] **STOP** — Request push confirmation before \`git push origin develop\`
+
+### Related
+
+- Commit: ${{ github.sha }}
+- Run ID: ${{ github.run_id }}
+EOF
+              )" \
+              --label "ci,automated,$CATEGORY"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      # Summary
+      - name: Summary
+        run: |
+          if [ "${{ steps.results.outputs.has_failures }}" == "true" ]; then
+            echo "❌ CI health check failed: ${{ steps.results.outputs.failed_steps }}"
+            echo "Consecutive failures: ${{ steps.state.outputs.consecutive }}"
+            if [ "${{ steps.state.outputs.consecutive }}" -ge 2 ]; then
+              echo "Issue created/updated"
+            else
+              echo "First failure - tracking state"
+            fi
+          else
+            echo "✅ CI health check passed"
+          fi

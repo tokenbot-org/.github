@@ -1,0 +1,153 @@
+# Daily Issue Triage
+# Reviews open CI/CD issues and produces priority report
+# Schedule: 1:15 AM America/Los_Angeles (9:15 AM UTC)
+
+name: Daily Issue Triage
+
+on:
+  schedule:
+    - cron: '15 9 * * *'  # 1:15 AM PST (9:15 AM UTC)
+  workflow_dispatch:       # Manual testing
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: List open CI issues
+        id: list
+        run: |
+          echo "Querying open CI/automated issues..."
+          gh issue list \
+            --repo ${{ github.repository }} \
+            --label "ci,automated" \
+            --state open \
+            --json number,title,labels,createdAt,updatedAt \
+            --jq '.[] | "\(.number)|\(.title)|\(.labels | map(.name) | join(","))|\(.createdAt)|\(.updatedAt)"' \
+            > issues.txt || touch issues.txt
+
+          TOTAL=$(wc -l < issues.txt)
+          echo "total=$TOTAL" >> $GITHUB_OUTPUT
+
+          if [ "$TOTAL" -eq 0 ]; then
+            echo "✅ No open CI issues found"
+            exit 0
+          fi
+
+          # Categorize by failure type
+          LINT=$(grep -c "lint-failure" issues.txt || echo 0)
+          TYPECHECK=$(grep -c "typecheck-failure" issues.txt || echo 0)
+          TEST=$(grep -c "test-failure" issues.txt || echo 0)
+          BUILD=$(grep -c "build-failure" issues.txt || echo 0)
+          DEPLOY=$(grep -c "deploy-failure" issues.txt || echo 0)
+
+          echo "lint=$LINT" >> $GITHUB_OUTPUT
+          echo "typecheck=$TYPECHECK" >> $GITHUB_OUTPUT
+          echo "test=$TEST" >> $GITHUB_OUTPUT
+          echo "build=$BUILD" >> $GITHUB_OUTPUT
+          echo "deploy=$DEPLOY" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Create triage report
+        if: steps.list.outputs.total > 0
+        run: |
+          REPORT_FILE="triage-report.md"
+
+          cat > "$REPORT_FILE" <<'EOFR'
+## 📊 Daily CI Issue Triage Report
+
+**Generated:** $(date -u '+%Y-%m-%d %H:%M UTC')  
+**Repository:** ${{ github.repository }}
+
+### Summary
+
+- **Total Open Issues:** ${{ steps.list.outputs.total }}
+- Lint Failures: ${{ steps.list.outputs.lint }}
+- Typecheck Failures: ${{ steps.list.outputs.typecheck }}
+- Test Failures: ${{ steps.list.outputs.test }}
+- Build Failures: ${{ steps.list.outputs.build }}
+- Deploy Failures: ${{ steps.list.outputs.deploy }}
+
+### Priority Ranking
+
+**🔴 Critical (Build/Deploy failures blocking releases):**
+EOFR
+
+          # Add critical issues
+          grep -E "build-failure|deploy-failure" issues.txt | while IFS='|' read -r num title labels created updated; do
+            echo "- #$num: $title" >> "$REPORT_FILE"
+          done || echo "None" >> "$REPORT_FILE"
+
+          cat >> "$REPORT_FILE" <<'EOFR'
+
+**🟠 High (Test failures affecting quality):**
+EOFR
+
+          grep "test-failure" issues.txt | while IFS='|' read -r num title labels created updated; do
+            echo "- #$num: $title" >> "$REPORT_FILE"
+          done || echo "None" >> "$REPORT_FILE"
+
+          cat >> "$REPORT_FILE" <<'EOFR'
+
+**🟡 Medium (Lint/typecheck issues):**
+EOFR
+
+          grep -E "lint-failure|typecheck-failure" issues.txt | while IFS='|' read -r num title labels created updated; do
+            echo "- #$num: $title" >> "$REPORT_FILE"
+          done || echo "None" >> "$REPORT_FILE"
+
+          cat >> "$REPORT_FILE" <<'EOFR'
+
+### Recommended Actions
+
+1. Address **Critical** issues first (blocking releases)
+2. Fix **High** priority items (quality impact)
+3. Clean up **Medium** issues in batches
+
+### Automation Notes
+
+- Issues are created after **2+ consecutive failures**
+- Fix locally, run full CI, then request push confirmation
+- Close issues manually after fixes are verified in CI
+
+---
+
+*This report is generated automatically. [View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})*
+EOFR
+
+          echo "Report generated:"
+          cat "$REPORT_FILE"
+
+          # Create or update triage issue
+          EXISTING=$(gh issue list \
+            --repo ${{ github.repository }} \
+            --label "triage-report" \
+            --state open \
+            --json number \
+            --jq '.[0].number' || echo "")
+
+          if [ -z "$EXISTING" ]; then
+            gh issue create \
+              --repo ${{ github.repository }} \
+              --title "📊 CI Issue Triage Report ($(date +%Y-%m-%d))" \
+              --body "$(cat $REPORT_FILE)" \
+              --label "triage-report,automated"
+          else
+            gh issue comment $EXISTING \
+              --repo ${{ github.repository }} \
+              --body "$(cat $REPORT_FILE)"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Summary
+        run: |
+          if [ "${{ steps.list.outputs.total }}" -eq 0 ]; then
+            echo "✅ No open CI issues - system healthy"
+          else
+            echo "📊 Triage report created for ${{ steps.list.outputs.total }} open issues"
+          fi
