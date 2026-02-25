@@ -234,11 +234,8 @@ jobs:
               --body "🔄 Still failing after consecutive run. [View latest run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})"
           else
             echo "Creating new issue for $PRIMARY failure"
-            gh issue create \
-              --repo ${{ github.repository }} \
-              --title "🚨 CI Health Check Failed: $PRIMARY (consecutive failure #${{ steps.state.outputs.consecutive }})" \
-              --body "$(cat <<'EOF'
-## 🚨 Automated CI Failure Report
+            
+            ISSUE_BODY="## 🚨 Automated CI Failure Report
 
 **Workflow:** Daily CI Health Check  
 **Run:** [View run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})  
@@ -263,9 +260,12 @@ jobs:
 ### Related
 
 - Commit: ${{ github.sha }}
-- Run ID: ${{ github.run_id }}
-EOF
-              )" \
+- Run ID: ${{ github.run_id }}"
+
+            gh issue create \
+              --repo ${{ github.repository }} \
+              --title "🚨 CI Health Check Failed: $PRIMARY (consecutive failure #${{ steps.state.outputs.consecutive }})" \
+              --body "$ISSUE_BODY" \
               --label "ci,automated,$CATEGORY"
           fi
         env:
