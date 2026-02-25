@@ -236,31 +236,31 @@ jobs:
             echo "Creating new issue for $PRIMARY failure"
             
             ISSUE_BODY="## 🚨 Automated CI Failure Report
-
-**Workflow:** Daily CI Health Check  
-**Run:** [View run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})  
-**Branch:** develop  
-**Triggered:** ${{ github.event.schedule || 'manual' }} (1:00 AM PT / 9:00 AM UTC)  
-**Consecutive Failures:** ${{ steps.state.outputs.consecutive }}
-
-### Failure Details
-
-**Failed Steps:** $FAILED  
-**Primary Category:** $PRIMARY
-
-### Suggested Next Steps
-
-- [ ] Reproduce locally: \`git checkout develop && git pull\`
-- [ ] Run failed step(s) locally
-- [ ] Fix the issue
-- [ ] Run full local CI verification
-- [ ] Merge to develop locally
-- [ ] **STOP** — Request push confirmation before \`git push origin develop\`
-
-### Related
-
-- Commit: ${{ github.sha }}
-- Run ID: ${{ github.run_id }}"
+            
+            **Workflow:** Daily CI Health Check
+            **Run:** [View run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            **Branch:** develop
+            **Triggered:** ${{ github.event.schedule || 'manual' }} (1:00 AM PT / 9:00 AM UTC)
+            **Consecutive Failures:** ${{ steps.state.outputs.consecutive }}
+            
+            ### Failure Details
+            
+            **Failed Steps:** $FAILED
+            **Primary Category:** $PRIMARY
+            
+            ### Suggested Next Steps
+            
+            - [ ] Reproduce locally: \`git checkout develop && git pull\`
+            - [ ] Run failed step(s) locally
+            - [ ] Fix the issue
+            - [ ] Run full local CI verification
+            - [ ] Merge to develop locally
+            - [ ] **STOP** — Request push confirmation before \`git push origin develop\`
+            
+            ### Related
+            
+            - Commit: ${{ github.sha }}
+            - Run ID: ${{ github.run_id }}"
 
             gh issue create \
               --repo ${{ github.repository }} \
