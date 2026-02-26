@@ -56,21 +56,30 @@ jobs:
         if: steps.list.outputs.total > 0
         run: |
           REPORT_FILE="triage-report.md"
+          TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M UTC')
+          REPO="${{ github.repository }}"
+          TOTAL="${{ steps.list.outputs.total }}"
+          LINT="${{ steps.list.outputs.lint }}"
+          TYPECHECK="${{ steps.list.outputs.typecheck }}"
+          TEST="${{ steps.list.outputs.test }}"
+          BUILD="${{ steps.list.outputs.build }}"
+          DEPLOY="${{ steps.list.outputs.deploy }}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-          cat > "$REPORT_FILE" <<'EOFR'
+          cat > "$REPORT_FILE" <<EOFR
 ## 📊 Daily CI Issue Triage Report
 
-**Generated:** $(date -u '+%Y-%m-%d %H:%M UTC')  
-**Repository:** ${{ github.repository }}
+**Generated:** ${TIMESTAMP}  
+**Repository:** ${REPO}
 
 ### Summary
 
-- **Total Open Issues:** ${{ steps.list.outputs.total }}
-- Lint Failures: ${{ steps.list.outputs.lint }}
-- Typecheck Failures: ${{ steps.list.outputs.typecheck }}
-- Test Failures: ${{ steps.list.outputs.test }}
-- Build Failures: ${{ steps.list.outputs.build }}
-- Deploy Failures: ${{ steps.list.outputs.deploy }}
+- **Total Open Issues:** ${TOTAL}
+- Lint Failures: ${LINT}
+- Typecheck Failures: ${TYPECHECK}
+- Test Failures: ${TEST}
+- Build Failures: ${BUILD}
+- Deploy Failures: ${DEPLOY}
 
 ### Priority Ranking
 
@@ -82,7 +91,7 @@ EOFR
             echo "- #$num: $title" >> "$REPORT_FILE"
           done || echo "None" >> "$REPORT_FILE"
 
-          cat >> "$REPORT_FILE" <<'EOFR'
+          cat >> "$REPORT_FILE" <<EOFR
 
 **🟠 High (Test failures affecting quality):**
 EOFR
@@ -91,7 +100,7 @@ EOFR
             echo "- #$num: $title" >> "$REPORT_FILE"
           done || echo "None" >> "$REPORT_FILE"
 
-          cat >> "$REPORT_FILE" <<'EOFR'
+          cat >> "$REPORT_FILE" <<EOFR
 
 **🟡 Medium (Lint/typecheck issues):**
 EOFR
@@ -100,7 +109,7 @@ EOFR
             echo "- #$num: $title" >> "$REPORT_FILE"
           done || echo "None" >> "$REPORT_FILE"
 
-          cat >> "$REPORT_FILE" <<'EOFR'
+          cat >> "$REPORT_FILE" <<EOFR
 
 ### Recommended Actions
 
@@ -116,7 +125,7 @@ EOFR
 
 ---
 
-*This report is generated automatically. [View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})*
+*This report is generated automatically. [View workflow run](${RUN_URL})*
 EOFR
 
           echo "Report generated:"
