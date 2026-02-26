@@ -66,67 +66,68 @@ jobs:
           DEPLOY="${{ steps.list.outputs.deploy }}"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
-          cat > "$REPORT_FILE" <<EOFR
-## 📊 Daily CI Issue Triage Report
-
-**Generated:** ${TIMESTAMP}  
-**Repository:** ${REPO}
-
-### Summary
-
-- **Total Open Issues:** ${TOTAL}
-- Lint Failures: ${LINT}
-- Typecheck Failures: ${TYPECHECK}
-- Test Failures: ${TEST}
-- Build Failures: ${BUILD}
-- Deploy Failures: ${DEPLOY}
-
-### Priority Ranking
-
-**🔴 Critical (Build/Deploy failures blocking releases):**
-EOFR
+          # Build report header
+          {
+            echo "## 📊 Daily CI Issue Triage Report"
+            echo ""
+            echo "**Generated:** ${TIMESTAMP}"
+            echo "**Repository:** ${REPO}"
+            echo ""
+            echo "### Summary"
+            echo ""
+            echo "- **Total Open Issues:** ${TOTAL}"
+            echo "- Lint Failures: ${LINT}"
+            echo "- Typecheck Failures: ${TYPECHECK}"
+            echo "- Test Failures: ${TEST}"
+            echo "- Build Failures: ${BUILD}"
+            echo "- Deploy Failures: ${DEPLOY}"
+            echo ""
+            echo "### Priority Ranking"
+            echo ""
+            echo "**🔴 Critical (Build/Deploy failures blocking releases):**"
+          } > "$REPORT_FILE"
 
           # Add critical issues
           grep -E "build-failure|deploy-failure" issues.txt | while IFS='|' read -r num title labels created updated; do
             echo "- #$num: $title" >> "$REPORT_FILE"
           done || echo "None" >> "$REPORT_FILE"
 
-          cat >> "$REPORT_FILE" <<EOFR
-
-**🟠 High (Test failures affecting quality):**
-EOFR
+          {
+            echo ""
+            echo "**🟠 High (Test failures affecting quality):**"
+          } >> "$REPORT_FILE"
 
           grep "test-failure" issues.txt | while IFS='|' read -r num title labels created updated; do
             echo "- #$num: $title" >> "$REPORT_FILE"
           done || echo "None" >> "$REPORT_FILE"
 
-          cat >> "$REPORT_FILE" <<EOFR
-
-**🟡 Medium (Lint/typecheck issues):**
-EOFR
+          {
+            echo ""
+            echo "**🟡 Medium (Lint/typecheck issues):**"
+          } >> "$REPORT_FILE"
 
           grep -E "lint-failure|typecheck-failure" issues.txt | while IFS='|' read -r num title labels created updated; do
             echo "- #$num: $title" >> "$REPORT_FILE"
           done || echo "None" >> "$REPORT_FILE"
 
-          cat >> "$REPORT_FILE" <<EOFR
-
-### Recommended Actions
-
-1. Address **Critical** issues first (blocking releases)
-2. Fix **High** priority items (quality impact)
-3. Clean up **Medium** issues in batches
-
-### Automation Notes
-
-- Issues are created after **2+ consecutive failures**
-- Fix locally, run full CI, then request push confirmation
-- Close issues manually after fixes are verified in CI
-
----
-
-*This report is generated automatically. [View workflow run](${RUN_URL})*
-EOFR
+          {
+            echo ""
+            echo "### Recommended Actions"
+            echo ""
+            echo "1. Address **Critical** issues first (blocking releases)"
+            echo "2. Fix **High** priority items (quality impact)"
+            echo "3. Clean up **Medium** issues in batches"
+            echo ""
+            echo "### Automation Notes"
+            echo ""
+            echo "- Issues are created after **2+ consecutive failures**"
+            echo "- Fix locally, run full CI, then request push confirmation"
+            echo "- Close issues manually after fixes are verified in CI"
+            echo ""
+            echo "---"
+            echo ""
+            echo "*This report is generated automatically. [View workflow run](${RUN_URL})*"
+          } >> "$REPORT_FILE"
 
           echo "Report generated:"
           cat "$REPORT_FILE"
