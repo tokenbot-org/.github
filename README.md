@@ -9,6 +9,10 @@ This repository contains organization-wide GitHub Actions workflows and automati
 - **`ci-health-check.yml`** — Daily CI health checks (1:00 AM PT / 9:00 AM UTC)
 - **`issue-triage.yml`** — Daily issue triage and priority reports (1:15 AM PT / 9:15 AM UTC)
 
+### Repository Conventions
+
+- **Auto-delete head branches on merge** — enabled org-wide; see the **Repository Settings** section below
+
 ## 🎯 CI Health Check Automation
 
 ### How It Works
@@ -151,14 +155,49 @@ When an automated issue is created:
 | `build-failure` | Build process errors |
 | `deploy-failure` | Deployment verification failures |
 
+## ⚙️ Repository Settings
+
+### Auto-delete head branches on merge
+
+All active repos have **"Automatically delete head branches"** enabled
+(`delete_branch_on_merge=true`). When a PR merges, its head branch —
+`feat/*`, `fix/*`, `chore/*`, `ci/*`, `docs/*`, `dependabot/*`, etc. — is
+deleted automatically. No cleanup workflow required.
+
+**Long-lived branches are never touched.** GitHub does not auto-delete a
+**protected** branch (nor the default branch, nor one that still has other
+open PRs). So a `develop → main` promotion PR keeps `develop` intact even
+though `develop` is the head of that PR. This safety net holds only while the
+long-lived branches stay protected — `develop` + `main` on every repo that
+has them, and `dev` + `main` on `liquidation-reversal-signals` (it uses
+`dev`, not `develop`). Confirm protection with:
+
+```bash
+gh api repos/tokenbot-org/<repo>/branches/develop --jq '.protected'   # expect: true
+```
+
+There is **no org-wide toggle** — the setting is per-repo. Enable it with:
+
+```bash
+gh api -X PATCH repos/tokenbot-org/<repo> -F delete_branch_on_merge=true
+```
+
+Enabled across all 18 active repos on 2026-07-05. Archived/sunset repos are
+intentionally excluded — do not re-enable them.
+
 ## 🔧 Maintenance
 
 ### Adding New Repo
 
-1. Copy workflow templates to new repo
-2. Verify `.github/actions/setup-node` exists (or use default setup)
-3. Run manual dispatch to test
-4. Monitor for first scheduled run
+1. Enable auto-delete head branches (see **Repository Settings** above):
+   ```bash
+   gh api -X PATCH repos/tokenbot-org/<repo> -F delete_branch_on_merge=true
+   ```
+2. Confirm `develop` / `main` are protected — this keeps `develop → main` promotion PRs safe from auto-delete
+3. Copy workflow templates to new repo
+4. Verify `.github/actions/setup-node` exists (or use default setup)
+5. Run manual dispatch to test
+6. Monitor for first scheduled run
 
 ### Excluding a Repo
 
